@@ -1,0 +1,18 @@
+# probe output
+*.json
+*.txt
+!requirements.txt
+probes/out/
+
+# secrets — API keys arrive in v1 (Ex Libris, Springshare, Alma)
+.env
+.env.*
+!.env.example
+
+# python, if a v1 proxy lands here
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.DS_Store
