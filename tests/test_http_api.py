@@ -1,9 +1,3 @@
-"""The shim's contract, checked without touching the network.
-
-The thing worth protecting here is that every operation stays a GET with flat query
-parameters. NebulaONE can register that form and nothing else.
-"""
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -76,3 +70,39 @@ def test_read_passes_the_question_through(app):
 
 def test_health_reports_configuration(app):
     assert app.get("/health").json()["ok"] is True
+
+
+def test_openapi_descriptions_stay_under_the_platform_cap():
+    """Open WebUI reads these straight from /openapi.json, and NebulaONE caps them."""
+    for path, item in http_api.app.openapi()["paths"].items():
+        described = item["get"].get("description", "")
+        assert len(described) <= http_api.MAX_DESCRIPTION_CHARS, path
+
+
+def test_the_shim_and_the_registration_doc_describe_the_endpoints_identically():
+    """One wording, two hosts. A drift here means a model gets different guidance
+    depending on whether it reached the service through NebulaONE or Open WebUI."""
+    from tests.test_endpoints_doc import DESCRIPTIONS
+
+    documented = [text for _, text in DESCRIPTIONS]
+    served = [
+        http_api.app.openapi()["paths"][p]["get"]["description"]
+        for p in ("/search", "/read", "/resolve")
+    ]
+    assert served == documented
+
+
+def test_the_shim_and_the_registration_doc_describe_the_parameters_identically():
+    from tests.test_endpoints_doc import SCHEMAS
+
+    documented = {
+        name: prop["description"]
+        for s in SCHEMAS
+        for name, prop in s["properties"].items()
+    }
+    served = {
+        p["name"]: p["schema"].get("description")
+        for item in http_api.app.openapi()["paths"].values()
+        for p in item["get"].get("parameters", [])
+    }
+    assert served == documented

@@ -19,12 +19,27 @@ The parameter descriptions below are prompt surface. A model reads them at call 
 each carries its routing hint and its traps, and they are worth editing with the same care
 as the system prompt.
 
+Each endpoint also gets a description of its own, quoted below the schema. **NebulaONE
+caps that description at 1024 characters**, so it carries only what a model needs before
+it decides to call at all: what the endpoint covers, how the results are ordered, and the
+fields it will get back. Everything parameter-specific belongs in the schema instead,
+where there is no such limit. `tests/test_endpoints_doc.py` fails if one grows past the
+cap.
+
 ---
 
 ## 1 · `/search` — find things across all four sources at once
 
+**Description** (990 characters):
+
+> Search Virginia Tech's library sources — the Primo discovery layer, the VTechWorks institutional repository, the VT Data Repository and OpenAlex — and return one merged, deduplicated set of records.
+>
+> Results are ordered by relevance and interleaved across sources. Access route is a tiebreak worth about one position, never a ranking: a paywalled article the sources ranked first still comes first, because it is usually the right answer and a VT user reaches it by signing in. Do not lead with whatever happens to be open.
+>
+> Every record carries access_route (vtechworks_text, figshare_file, oa_pdf, abstract_only or licensed_handoff), readable, a cite_uri for sending a human, and oa_url where a legal open copy exists. A record found in more than one source lists the others in also_in, which usually means VT deposited the accepted manuscript of a paywalled article. access_mix reports the spread of routes, and notes carries anything worth saying out loud, such as a source that failed.
+
 ```
-GET https://<host>/search?query={query}&sources={sources}&limit=5
+GET https://<host>/search?query={query}&sources={sources}&readable_only={readable_only}&limit={limit}
 ```
 
 ```json
@@ -39,6 +54,11 @@ GET https://<host>/search?query={query}&sources={sources}&limit=5
       "type": "string",
       "description": "Comma-separated list of sources to search, or omit for the default of primo, vtechworks and openalex together. 'primo' is the library's discovery layer and has by far the broadest coverage, but you will rarely be able to read what it finds. 'vtechworks' is VT's institutional repository and the only source whose full text can actually be read, so include it whenever reading the document matters. 'openalex' finds legal open-access copies of paywalled work. 'vtdr' is VT's data repository, for datasets rather than prose. 'primo_catalog' is VT's own books and physical holdings, for 'does the library have X'."
     },
+    "readable_only": {
+      "type": "boolean",
+      "description": "Discard every record whose full text cannot be fetched. False by default and rarely what you want, because it drops the licensed and catalog material that is often the most relevant answer, leaving only what happens to be open. Set it true only when the task genuinely requires reading text, such as comparing the methods sections of several papers.",
+      "default": false
+    },
     "limit": {
       "type": "integer",
       "description": "Results requested from each source before merging, between 1 and 20. Five is the default and is usually right. Raising it widens coverage and lengthens the response proportionally; the merged set is normally smaller than sources times limit, because the same work found twice becomes one record.",
@@ -49,16 +69,22 @@ GET https://<host>/search?query={query}&sources={sources}&limit=5
 }
 ```
 
-Returns `records[]`, already merged and normalized, readable ones first. Roughly 17 KB for
-fifteen records against the ~205 KB the same four searches cost unmerged.
+Returns `records[]`, already merged and normalized, **ordered by relevance and interleaved
+across sources**. Roughly 17 KB for fifteen records against the ~205 KB the same four
+searches cost unmerged.
+
+Access route is a tiebreak worth about one position, never a ranking. A paywalled article
+the sources ranked first still comes first, because that is usually the right answer and
+the user can reach it by signing in. `access_mix` reports the spread, so a caller can tell
+when an answer has drifted into the free corner of the library.
 
 | Field | Meaning |
 |---|---|
 | `id` | Pass to `/read` verbatim. Namespaced, e.g. `vtechworks:<uuid>` |
 | `access_route` | One of `vtechworks_text`, `figshare_file`, `oa_pdf`, `abstract_only`, `licensed_handoff` |
-| `readable` | True only when `/read` can return real text |
+| `readable` | True only when `/read` can return real text. Not a quality signal |
 | `also_in` | Other sources holding the same work — usually the deposited-manuscript pattern |
-| `cite_uri` | Where to send a human. For Primo this is the VT link resolver |
+| `cite_uri` | Where to send a human, percent-encoded and complete. For Primo this is the VT link resolver, often 700–800 characters, and it breaks if trimmed |
 | `oa_url` | A legal open copy, when one exists |
 
 `notes[]` carries anything the caller should say out loud, such as Figshare's recall
@@ -66,8 +92,14 @@ problem or a source that failed.
 
 ## 2 · `/read` — full text, reduced to what answers the question
 
+**Description** (520 characters):
+
+> Return a document's full text, reduced to the passages that answer a question. Call it only on records marked readable; anything else comes back with guidance on what to do instead, not an error.
+>
+> Passages arrive in document order, with chars_total and chars_returned so you know how much you did not see. You are reading an excerpt, not the document: when the passages do not settle the question, say what you saw rather than implying you read the whole thing. Reading several documents in one conversation is expected.
+
 ```
-GET https://<host>/read?id={id}&question={question}&max_chars=6000
+GET https://<host>/read?id={id}&question={question}&max_chars={max_chars}
 ```
 
 ```json
@@ -101,6 +133,10 @@ caller knows how much of the document it did not see. `text_available: false` co
 > times, and the one-document-per-conversation ceiling disappears.
 
 ## 3 · `/resolve` — DOI to open-access status
+
+**Description** (217 characters):
+
+> Turn a DOI into open-access status, backed by OpenAlex. Returns oa_url when a legal open copy exists. Call it on anything the discovery layer surfaced behind a subscription, before telling someone they cannot read it.
 
 ```
 GET https://<host>/resolve?doi={doi}

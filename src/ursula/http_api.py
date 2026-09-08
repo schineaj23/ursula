@@ -1,15 +1,3 @@
-"""HTTP face — for NebulaONE and VT's Open WebUI.
-
-Every operation is a GET with flat query parameters, because NebulaONE can register
-`?param=value` URLs and nothing else. That restriction is not a tax; it forces the
-lowest common denominator every host can call, which is exactly the shape a
-provider-agnostic API wants anyway.
-
-Open WebUI imports the OpenAPI document at /openapi.json directly as a tool server.
-
-    uvicorn ursula.http_api:app --port 8000
-"""
-
 from __future__ import annotations
 
 from typing import Annotated
@@ -26,40 +14,55 @@ app = FastAPI(
     description=(
         "Searches Primo VE, VTechWorks, the VT Data Repository and OpenAlex, normalizes "
         "them to one record shape, and returns ranked passages rather than whole "
-        "documents. Every record carries an `access_route` saying whether its text can "
-        "actually be read; never state or imply you have read something whose route is "
-        "`abstract_only` or `licensed_handoff`."
-    ),
+        "documents. Results are ordered by relevance, not by what can be read: a "
+        "paywalled article is often the best answer, and every record carries an "
+        "`access_route` and a link saying how to get at it. Never state or imply you "
+        "have read something whose route is `abstract_only` or `licensed_handoff`."
+    )
 )
 
-Q = Annotated[
-    str,
-    Query(
-        description=(
-            "The research topic, as plain keywords — for example 'machine learning soil "
-            "moisture'. Three to six substantive nouns works best. Strip question "
-            "phrasing such as 'how does' or 'what is', and do not use boolean operators; "
-            "the upstream indexes treat them as literal search terms."
-        ),
-        min_length=2,
-        max_length=400,
-    ),
-]
+# Endpoint descriptions, shared with agent/endpoints.md. NebulaONE caps one at 1024
+# characters, so these say what a model needs before deciding to call: what the endpoint
+# covers, how results are ordered, what comes back. Parameter-specific detail goes in the
+# Query() descriptions below, where no such cap applies.
+MAX_DESCRIPTION_CHARS = 1024
+
+SEARCH_DESCRIPTION = "Search Virginia Tech's library sources — the Primo discovery layer, the VTechWorks institutional repository, the VT Data Repository and OpenAlex — and return one merged, deduplicated set of records.\n\nResults are ordered by relevance and interleaved across sources. Access route is a tiebreak worth about one position, never a ranking: a paywalled article the sources ranked first still comes first, because it is usually the right answer and a VT user reaches it by signing in. Do not lead with whatever happens to be open.\n\nEvery record carries access_route (vtechworks_text, figshare_file, oa_pdf, abstract_only or licensed_handoff), readable, a cite_uri for sending a human, and oa_url where a legal open copy exists. A record found in more than one source lists the others in also_in, which usually means VT deposited the accepted manuscript of a paywalled article. access_mix reports the spread of routes, and notes carries anything worth saying out loud, such as a source that failed."
+
+READ_DESCRIPTION = "Return a document's full text, reduced to the passages that answer a question. Call it only on records marked readable; anything else comes back with guidance on what to do instead, not an error.\n\nPassages arrive in document order, with chars_total and chars_returned so you know how much you did not see. You are reading an excerpt, not the document: when the passages do not settle the question, say what you saw rather than implying you read the whole thing. Reading several documents in one conversation is expected."
+
+RESOLVE_DESCRIPTION = "Turn a DOI into open-access status, backed by OpenAlex. Returns oa_url when a legal open copy exists. Call it on anything the discovery layer surfaced behind a subscription, before telling someone they cannot read it."
+
+for _d in (SEARCH_DESCRIPTION, READ_DESCRIPTION, RESOLVE_DESCRIPTION):
+    assert len(_d) <= MAX_DESCRIPTION_CHARS, (
+        "endpoint description exceeds the platform cap"
+    )
+
+
+# Parameter descriptions, shared with agent/endpoints.md. No cap applies to these, so
+# the parameter-specific detail lives here rather than in the endpoint description.
+QUERY_DESCRIPTION = "The research topic to search for, as plain keywords — for example 'machine learning soil moisture'. Do not use boolean operators, quotation marks, or field prefixes; the upstream indexes treat them as literal search terms. Three to six substantive nouns works best. Full sentences and question phrasing reduce recall sharply, so strip words like 'how does' and 'what is' before calling."
+
+SOURCES_DESCRIPTION = "Comma-separated list of sources to search, or omit for the default of primo, vtechworks and openalex together. 'primo' is the library's discovery layer and has by far the broadest coverage, but you will rarely be able to read what it finds. 'vtechworks' is VT's institutional repository and the only source whose full text can actually be read, so include it whenever reading the document matters. 'openalex' finds legal open-access copies of paywalled work. 'vtdr' is VT's data repository, for datasets rather than prose. 'primo_catalog' is VT's own books and physical holdings, for 'does the library have X'."
+
+LIMIT_DESCRIPTION = "Results requested from each source before merging, between 1 and 20. Five is the default and is usually right. Raising it widens coverage and lengthens the response proportionally; the merged set is normally smaller than sources times limit, because the same work found twice becomes one record."
+
+READABLE_ONLY_DESCRIPTION = "Discard every record whose full text cannot be fetched. False by default and rarely what you want, because it drops the licensed and catalog material that is often the most relevant answer, leaving only what happens to be open. Set it true only when the task genuinely requires reading text, such as comparing the methods sections of several papers."
+
+ID_DESCRIPTION = "A record id exactly as it appeared in a /search response, such as 'vtechworks:b716bd09-0c7b-4c06-b582-4301b27cf5fe'. Only records marked 'readable': true have retrievable text; calling this on anything else returns guidance on what to do instead, not an error."
+
+QUESTION_DESCRIPTION = "What you want to learn from this document, phrased in the user's own terms — for example 'what accuracy did the model achieve and on what data'. Passages are ranked against this, so a specific question returns a far better excerpt than a bare topic. Omit it and you get the document's opening instead, which is rarely what you want."
+
+MAX_CHARS_DESCRIPTION = "Ceiling on the characters of document text returned, between 200 and 40000. The default of 6000 is a few pages and answers most questions. Raise it for a synthesis across a whole argument; lower it when reading several documents in one conversation."
+
+DOI_DESCRIPTION = "A DOI, either bare like '10.1007/s11269-024-04069-3' or as a full 'https://doi.org/...' URL — both are accepted, so no stripping is needed. Call this on anything the discovery layer surfaced behind a subscription, before telling the user they cannot read it. Returns 'oa_url' when a legal open copy exists."
+
+Q = Annotated[str, Query(description=QUERY_DESCRIPTION, min_length=2, max_length=400)]
 
 SOURCES = Annotated[
     str,
-    Query(
-        description=(
-            "Comma-separated sources. `primo` is the library's discovery layer and has "
-            "by far the broadest coverage, but you will rarely be able to read what it "
-            "finds. `vtechworks` is VT's institutional repository and the only source "
-            "whose full text is readable. `openalex` finds legal open copies of "
-            "paywalled work. `vtdr` is VT's data repository, for datasets rather than "
-            "prose. `primo_catalog` is VT's own books and physical holdings. "
-            "Default searches primo, vtechworks and openalex together."
-        ),
-        pattern=r"^[a-z_,\s]*$",  # empty is the documented default
-    ),
+    # Empty is the documented default.
+    Query(description=SOURCES_DESCRIPTION, pattern=r"^[a-z_,\s]*$"),
 ]
 
 
@@ -80,57 +83,43 @@ async def health() -> dict:
     return {"ok": True, "version": "0.1.0", "mailto_configured": bool(MAILTO)}
 
 
-@app.get("/search", summary="Search VT's library sources and return merged records")
+@app.get(
+    "/search",
+    summary="Search VT's library sources and return merged records",
+    description=SEARCH_DESCRIPTION,
+)
 async def search_endpoint(
     query: Q,
     sources: SOURCES = "",
-    limit: Annotated[int, Query(ge=1, le=20, description="Results per source.")] = 5,
+    limit: Annotated[int, Query(ge=1, le=20, description=LIMIT_DESCRIPTION)] = 5,
     readable_only: Annotated[
-        bool,
-        Query(description="Keep only records whose full text this service can fetch."),
+        bool, Query(description=READABLE_ONLY_DESCRIPTION)
     ] = False,
 ) -> dict:
     return await core.search(query, _sources(sources), limit, readable_only)
 
 
-@app.get("/read", summary="Read a record's full text, reduced to relevant passages")
+@app.get(
+    "/read",
+    summary="Read a record's full text, reduced to relevant passages",
+    description=READ_DESCRIPTION,
+)
 async def read_endpoint(
-    id: Annotated[
-        str,
-        Query(
-            description=(
-                "A record `id` exactly as returned by /search, such as "
-                "`vtechworks:2f0e…`. Only records with `readable: true` have text."
-            )
-        ),
-    ],
-    question: Annotated[
-        str,
-        Query(
-            description=(
-                "What you want to learn from the document, in the user's own terms. "
-                "Passages are ranked against this, so a specific question returns a far "
-                "better excerpt than a topic. Omit it to get the document's opening."
-            )
-        ),
-    ] = "",
+    id: Annotated[str, Query(description=ID_DESCRIPTION)],
+    question: Annotated[str, Query(description=QUESTION_DESCRIPTION)] = "",
     max_chars: Annotated[
-        int, Query(ge=200, le=40000, description="Ceiling on returned text.")
+        int, Query(ge=200, le=40000, description=MAX_CHARS_DESCRIPTION)
     ] = 6000,
 ) -> dict:
     return await core.read(id, question, max_chars)
 
 
-@app.get("/resolve", summary="Look up a DOI's open-access status")
+@app.get(
+    "/resolve",
+    summary="Look up a DOI's open-access status",
+    description=RESOLVE_DESCRIPTION,
+)
 async def resolve_endpoint(
-    doi: Annotated[
-        str,
-        Query(
-            description=(
-                "A DOI, bare or as a full doi.org URL — both are accepted. Returns "
-                "`oa_url` when a legal open copy exists."
-            )
-        ),
-    ],
+    doi: Annotated[str, Query(description=DOI_DESCRIPTION)],
 ) -> dict:
     return await core.resolve(doi)

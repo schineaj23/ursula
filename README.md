@@ -97,9 +97,19 @@ vtechworks_text | figshare_file | oa_pdf | abstract_only | licensed_handoff
 ```
 
 Every honesty guarantee derives from it existing. It is how the agent says "full text from
-VTechWorks" rather than silently returning less than the user assumes, and it is why a
-merge prefers the route that yields text: the paywalled article whose accepted manuscript
-VT deposited is the most valuable pattern in the system.
+VTechWorks" rather than silently returning less than the user assumes.
+
+**It is not a quality signal, and results are not sorted by it.** Ranking a result set by
+what the service can read buries the most relevant article in the library behind a
+marginally relevant one that happens to be open, which quietly narrows a research library
+to its free corner. Results come back ordered by relevance and interleaved across sources;
+the route is a tiebreak worth about one position. A paywalled article a VT user reaches by
+signing in is a good answer, and the response carries a `cite_uri` that gets them there.
+
+The route does decide one thing outright: when the same work turns up twice, the merge
+keeps the copy that yields text. The paywalled article whose accepted manuscript VT
+deposited is the most valuable pattern in the system, and that is about which copy to
+read, not about where the record ranks.
 
 ## What live probing established
 

@@ -1,10 +1,4 @@
-"""Primo VE discovery, via the Discovery UI's own /pnxs endpoint.
-
-Undocumented but unauthenticated — the identical request a browser makes. 91 KB per
-five-record search on the wire, which is exactly why it belongs behind this service and
-not in front of a model. Swap to the keyed /primo/v1/search when a key exists; only this
-module changes.
-"""
+"""Primo VE discovery, via the Discovery UI's own /pnxs endpoint."""
 
 from __future__ import annotations
 
@@ -14,6 +8,8 @@ import httpx
 
 from ..config import PRIMO_INST, PRIMO_PNXS, PRIMO_VID
 from ..models import AccessRoute, Record, dedupe_title, normalize_doi, normalize_type
+
+PRIMO_FULLDISPLAY = "https://virginiatech.primo.exlibrisgroup.com/discovery/fulldisplay"
 
 
 def _first(node: Any, *path: str) -> str | None:
@@ -38,6 +34,17 @@ def _year(raw: str | None) -> int | None:
         if chunk.startswith(("19", "20")):
             return int(chunk)
     return None
+
+
+def _permalink(record_id: str) -> str:
+    """A record's page in Discovery, for when Alma gives us no resolver link.
+
+    Alma-E and catalog records frequently come back with `almaOpenurl: null`, which used
+    to leave them with no link at all. Central-index ids carry a `cdi_` prefix; anything
+    else is local.
+    """
+    context = "PC" if record_id.startswith("cdi_") else "L"
+    return f"{PRIMO_FULLDISPLAY}?docid={record_id}&vid={PRIMO_VID}&context={context}"
 
 
 def _route(doc: dict, rec_type: str) -> AccessRoute:
@@ -69,6 +76,8 @@ def parse(payload: dict, limit: int) -> list[Record]:
             continue
         rec_type = normalize_type(_first(display, "type"))
         rec_id = _first(pnx, "control", "recordid") or doc.get("@id") or f"idx{i}"
+        # The resolver link is the better handoff, since it lands on VT's actual access.
+        openurl = (doc.get("delivery") or {}).get("almaOpenurl")
         records.append(
             Record(
                 id=f"primo:{rec_id}",
@@ -82,7 +91,7 @@ def parse(payload: dict, limit: int) -> list[Record]:
                 type=rec_type,
                 doi=normalize_doi(_first(addata, "doi")),
                 abstract=_first(addata, "abstract"),
-                cite_uri=(doc.get("delivery") or {}).get("almaOpenurl"),
+                cite_uri=openurl or _permalink(rec_id),
                 rank=i,
             )
         )

@@ -1,14 +1,3 @@
-"""Passage selection.
-
-The number that justifies this whole service is 100 KB — one journal article's extracted
-text, and more than an agent can spend more than once. Ranking windows against the actual
-question turns that into a few thousand characters, which is what lifts the ceiling of one
-document per conversation.
-
-Deliberately dependency-free and lexical. An embedding model would rank better and would
-also turn a service anyone can run into one somebody has to operate.
-"""
-
 from __future__ import annotations
 
 import math

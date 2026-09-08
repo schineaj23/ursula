@@ -1,13 +1,3 @@
-"""MCP face — for agents run locally: Claude Code, prime-agent, Claude Desktop, Cursor.
-
-Same three functions as the HTTP shim, same record shape. A host with a filesystem could
-fetch VTechWorks directly and grep it, but it would then have to re-derive VT's routing
-rules and the access-route contract, which is what this exists to keep in one place.
-
-    ursula-mcp                    # stdio
-    ursula-mcp --http --port 8001 # streamable HTTP
-"""
-
 from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
@@ -19,10 +9,11 @@ mcp = MCPServer(
     title="Ursula — VT library research",
     version="0.1.0",
     instructions=(
-        "Search Virginia Tech's library sources, then read what is actually readable. "
-        "Primo tells you what exists; VTechWorks and OpenAlex tell you what can be read. "
-        "Respect every record's access_route: never state or imply you have read "
-        "something you have only found."
+        "Search Virginia Tech's library sources, then read what is readable and link "
+        "what is not. Primo tells you what exists; VTechWorks and OpenAlex tell you what "
+        "can be read. Rank by relevance rather than by access, since the best answer is "
+        "often paywalled, and respect every record's access_route: never state or imply "
+        "you have read something you have only found."
     ),
 )
 
@@ -44,6 +35,12 @@ async def ursula_search(
     and is mostly unreadable. VTechWorks is VT's repository and the only readable full
     text. OpenAlex finds legal open copies. vtdr is datasets. primo_catalog is books and
     physical holdings.
+
+    Results are ordered by relevance, interleaved across sources; access route is a
+    tiebreak worth about one position, not a ranking. Do not privilege what you can read.
+    A paywalled article the user can reach by signing in is frequently the best answer,
+    and `access_mix` shows the spread you have. `readable_only` discards everything else
+    and is rarely what you want.
 
     Every record carries `access_route` and `readable`. Never state or imply you have
     read something whose route is `abstract_only`, `oa_pdf` or `licensed_handoff`.
@@ -90,8 +87,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args(argv)
     if args.http:
-        mcp.settings.port = args.port
-        mcp.run("streamable-http")
+        mcp.run("streamable-http", port=args.port)
     else:
         mcp.run("stdio")
 

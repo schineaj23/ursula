@@ -1,5 +1,3 @@
-"""Everything institution-specific, in one place."""
-
 from __future__ import annotations
 
 import os

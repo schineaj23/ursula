@@ -1,9 +1,3 @@
-"""Integration tests against the real upstream APIs: `pytest --live`.
-
-These are the successor to probes/probe.sh. They assert the shapes this service depends
-on, so an upstream change shows up as a named failure rather than an empty result set.
-"""
-
 import pytest
 
 from ursula import core
@@ -97,3 +91,22 @@ async def test_read_reduces_a_full_document_to_relevant_passages():
 async def test_read_refuses_records_it_cannot_read():
     out = await core.read("primo:anything")
     assert out["text_available"] is False and out["guidance"]
+
+
+async def test_search_returns_a_mix_of_access_routes():
+    """A result set that is all open access has silently narrowed the library."""
+    result = await core.search("climate adaptation coastal virginia", limit=5)
+    assert len(result["access_mix"]) >= 3, result["access_mix"]
+    top = [r["access_route"] for r in result["records"][:6]]
+    assert len(set(top)) >= 2, "the head of the list should not be one route"
+
+
+async def test_every_primo_record_carries_a_whole_usable_link():
+    """A link with a space in it autolinks to 126 of its 795 characters and dies."""
+    result = await core.search(
+        "climate adaptation coastal virginia", ("primo", "primo_catalog"), limit=5
+    )
+    links = [r.get("cite_uri") for r in result["records"]]
+    assert links and all(links), "every discovery record needs somewhere to send a human"
+    assert not [u for u in links if " " in u or "<" in u or ">" in u]
+    assert all(u.startswith("https://") for u in links)

@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 import httpx
 
 from .config import TIMEOUT, USER_AGENT, VT_DOI_PREFIX
-from .models import READABILITY, AccessRoute, Record, clamp
+from .models import RANK_BONUS, READABILITY, AccessRoute, Record, clamp
 from .rank import rank
 from .sources import figshare, openalex, primo, vtechworks
 
@@ -65,6 +65,10 @@ def merge(groups: list[list[Record]]) -> list[Record]:
     VT's deposited manuscript is not a duplicate to suppress. It is the open copy of a
     closed article, and it is the most valuable pattern in the system, so the merged
     record keeps the richest metadata and the route that actually yields text.
+
+    The set comes back **ordered by relevance**, interleaved across sources. Access route
+    is a tiebreak worth at most one position, so a paywalled article the sources ranked
+    first still comes first. What a user asked for is the topic, not the licence.
     """
     merged: dict[str, Record] = {}
     for group in groups:
@@ -90,7 +94,7 @@ def merge(groups: list[list[Record]]) -> list[Record]:
                     keep.also_in.append(src)
             merged[key] = keep
     out = list(merged.values())
-    out.sort(key=lambda r: (-READABILITY[r.access_route], r.rank, r.title.lower()))
+    out.sort(key=lambda r: (r.rank - RANK_BONUS[r.access_route], r.title.lower()))
     return out
 
 
@@ -134,11 +138,20 @@ async def search(
     records = merge(groups)
     if readable_only:
         records = [r for r in records if r.readable]
+    mix: dict[str, int] = {}
+    for r in records:
+        mix[r.access_route.value] = mix.get(r.access_route.value, 0) + 1
     return {
         "query": query,
         "sources": list(sources),
         "count": len(records),
         "readable": sum(1 for r in records if r.readable),
+        "access_mix": mix,
+        "ordering": (
+            "Relevance, interleaved across sources. Access route breaks ties only, so a "
+            "record you cannot read may well be the best answer — present these together "
+            "and let the user choose, rather than leading with whatever happens to be open."
+        ),
         "records": [r.to_dict(abstract_chars) for r in records],
         "notes": notes,
     }

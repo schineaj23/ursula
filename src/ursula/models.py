@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from urllib.parse import quote
 
 
 class AccessRoute(str, Enum):
@@ -21,13 +22,31 @@ class AccessRoute(str, Enum):
     LICENSED_HANDOFF = "licensed_handoff"
 
 
-#: Higher wins a merge, and sorts higher in a result set. Text beats a link to text.
+#: Which copy of the same work to keep when two sources both have it. Text beats a link
+#: to text, because this decides what `read()` can return — not what a user should see.
 READABILITY = {
     AccessRoute.VTECHWORKS_TEXT: 4,
     AccessRoute.FIGSHARE_FILE: 3,
     AccessRoute.OA_PDF: 2,
     AccessRoute.ABSTRACT_ONLY: 1,
     AccessRoute.LICENSED_HANDOFF: 0,
+}
+
+#: How far a route may move a record up the result list, in positions.
+#:
+#: A separate scale from READABILITY, and deliberately flatter. Sorting a result set by
+#: what this service can read buries the most relevant article in the library behind a
+#: marginally relevant one that happens to be open. Relevance is what a user asked for;
+#: a paywalled article they can reach by signing in is a good answer, so it is nudged,
+#: never demoted. Nothing here exceeds one position.
+RANK_BONUS = {
+    AccessRoute.VTECHWORKS_TEXT: 1.0,
+    AccessRoute.FIGSHARE_FILE: 1.0,
+    AccessRoute.OA_PDF: 0.5,
+    # Above abstract_only: a signed-in VT user can read this, which is more use to them
+    # than a record with no route at all, even though this service can read neither.
+    AccessRoute.LICENSED_HANDOFF: 0.25,
+    AccessRoute.ABSTRACT_ONLY: 0.0,
 }
 
 #: Routes whose text `read()` can genuinely return.
@@ -96,6 +115,23 @@ def dedupe_title(title: str) -> str:
     return t
 
 
+#: Characters legal in a URL. `%` is safe so already-encoded sequences survive a re-pass.
+_URL_SAFE = "/:?#[]@!$&'()*+,;=%~._-"
+
+
+def safe_url(url: str | None) -> str | None:
+    """Percent-encode a URL so it survives being written into a chat message.
+
+    Primo's `almaOpenurl` arrives with a literal space in its `ctx_tim` timestamp, and
+    with `<` and `>` elsewhere. A 795-character link then autolinks as 126 characters,
+    because every client stops at the space, and the truncated link resolves to nothing.
+    Encoding here is the difference between a working handoff and a dead one.
+    """
+    if not url:
+        return None
+    return quote(url.strip(), safe=_URL_SAFE)
+
+
 def clamp(text: str | None, limit: int) -> str | None:
     """Abstracts are the fattest field worth keeping. Keep them, but bounded."""
     if not text:
@@ -127,6 +163,11 @@ class Record:
 
     also_in: list[str] = field(default_factory=list)
     """Other sources holding the same work. The published-vs-deposited pattern lives here."""
+
+    def __post_init__(self) -> None:
+        # Normalize here rather than in each source, so a new source cannot forget.
+        self.cite_uri = safe_url(self.cite_uri)
+        self.oa_url = safe_url(self.oa_url)
 
     def merge_key(self) -> str:
         if self.doi:

@@ -1,9 +1,3 @@
-"""Parser tests against hand-built payloads mirroring the real response shapes.
-
-Fixtures are minimal on purpose. The shapes they encode were confirmed live; what these
-tests protect is the mapping into the record contract, not the upstream schema.
-"""
-
 from ursula.models import AccessRoute
 from ursula.sources import figshare, openalex, primo, vtechworks
 
@@ -155,3 +149,29 @@ def test_figshare_record_is_readable_only_when_it_has_files():
         figshare.to_record({**article, "files": []}).access_route
         is AccessRoute.ABSTRACT_ONLY
     )
+
+
+def test_primo_falls_back_to_a_permalink_when_alma_gives_no_resolver_link():
+    """Alma-E and catalog records often return almaOpenurl: null."""
+    doc = primo_doc(delivery={"almaOpenurl": None})
+    (rec,) = primo.parse({"docs": [doc]}, limit=5)
+    assert rec.cite_uri.startswith(primo.PRIMO_FULLDISPLAY)
+    assert "docid=cdi_abc_123" in rec.cite_uri and "context=PC" in rec.cite_uri
+
+
+def test_primo_permalink_uses_the_local_context_for_catalog_ids():
+    doc = primo_doc(delivery={"almaOpenurl": None})
+    doc["pnx"]["control"]["recordid"] = ["alma991011223379708646"]
+    (rec,) = primo.parse({"docs": [doc]}, limit=5)
+    assert "context=L" in rec.cite_uri
+
+
+def test_primo_returns_the_resolver_link_whole():
+    long_url = (
+        "https://na07.alma.exlibrisgroup.com/openurl?ctx_tim=2026-09-08 13:36:41&"
+        + "p=v&" * 150
+    )
+    doc = primo_doc(delivery={"almaOpenurl": long_url})
+    (rec,) = primo.parse({"docs": [doc]}, limit=5)
+    assert len(rec.cite_uri) >= len(long_url), "the link must not be shortened"
+    assert " " not in rec.cite_uri

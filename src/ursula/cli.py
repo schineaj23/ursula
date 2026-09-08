@@ -1,6 +1,3 @@
-"""Command line face — for local testing, and for use from a skill in a host that can
-run code. `search` and `read` print the same JSON the HTTP and MCP faces return."""
-
 from __future__ import annotations
 
 import argparse
