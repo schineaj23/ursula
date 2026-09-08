@@ -4,7 +4,7 @@ A prior desk survey of VT library APIs informed this design. Before building, ev
 endpoint was called live. Most of the survey held up; three things did not. This file
 records the deltas so nobody re-derives them.
 
-Probes run 2 Sep 2026. Re-run with `./probes/probe.sh`.
+Probes run 2 Sep 2026, extended 8 Sep 2026. Re-run with `pytest --live`.
 
 ---
 
@@ -154,11 +154,47 @@ discovery layer, at conversation volume. It is a sound bridge. It is also uncont
 can change without notice, so a schema break is expected maintenance, and the supported
 `/primo/v1/search` should replace it once a key exists.
 
-## 5. Not yet verified
+## 5. Two limits on VTechWorks full text the survey did not mention
 
-- **Unpaywall.** Requires an `email` parameter; not called during probing to avoid sending
-  a personal address to a third party. `probe.sh --email you@vt.edu` exercises it. Use a
-  `@vt.edu` address — it identifies the institution to Unpaywall's and OpenAlex's polite-use
-  pools, which is both faster and better manners.
-- **NebulaONE's response size cap.** Unknown, and it is the highest-value unknown remaining.
-  See `probes/README.md`.
+Found while testing `read` against real documents rather than one sample.
+
+**DSpace truncates its own text extraction at 100,000 characters.** Two unrelated
+documents, of very different lengths, both returned exactly 100,000 characters against a
+declared `sizeBytes` of ~100,390. Shorter items return their real length — 12,364 and
+56,304 characters in the same sample — so this is a cap, not a coincidence.
+
+It matters most for the holding VTechWorks is most distinctive for. A dissertation is
+readable only down to its first ~100 KB, whatever its true length, and nothing upstream
+says so. `read` reports `text_truncated_upstream` when a document arrives at the cap.
+
+**A `TEXT` bundle can exist and be empty.** One item in a four-record sample returned a
+single character: the bundle is present, so the item looks readable, but extraction
+produced nothing — normally a scanned document with no OCR layer.
+
+This is the failure mode that would most easily produce a confident, wrong answer, since
+the record advertises full text and delivers none. `read` treats anything under 200
+characters as no text at all and returns the record as abstract-only.
+
+---
+
+## 6. Unpaywall is not needed
+
+The survey included Unpaywall for DOI-to-open-access resolution. OpenAlex answers the same
+question in one call:
+
+```
+GET /works?filter=doi:10.1007/s11269-024-04069-3&select=…    → 1,838 B, oa_url populated
+```
+
+That is a query parameter rather than a path segment, which also makes it registrable on
+platforms that accept only `?param=value` URLs. Unpaywall additionally requires an `email`
+parameter, so dropping it removes a third-party recipient of a personal address as well as
+a round trip. It is gone from the design.
+
+---
+
+## 7. Still unverified
+
+- **NebulaONE's response size cap.** See `probes/README.md`. Much less urgent now that the
+  service keeps responses to ~17 KB for a search and ~4 KB for a document read, but it
+  still bounds how large a `limit` or `max_chars` an agent can usefully ask for.

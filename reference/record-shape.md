@@ -1,8 +1,11 @@
 # The normalized record
 
-Three sources describe the same objects in three vocabularies. Everything downstream of a
-search speaks one shape. In v0 the model performs this conversion itself, guided by the
-system prompt; in v1 a proxy would do it server-side. The contract is the same either way.
+Four sources describe the same objects in four vocabularies. Everything downstream of a
+search speaks one shape.
+
+This document is the contract; [`../src/ursula/models.py`](../src/ursula/models.py) is the
+implementation and [`../tests/test_sources.py`](../tests/test_sources.py) is what holds each
+source to it. The conversion happens server-side, so an agent never sees a raw vocabulary.
 
 ```
 Record
@@ -25,7 +28,7 @@ different answers with five different follow-up actions.
 
 | Value | Meaning | Agent's move |
 |---|---|---|
-| `vtechworks_text` | DSpace `TEXT` bundle exists | Fetch it. Clean UTF-8, no parsing. |
+| `vtechworks_text` | DSpace `TEXT` bundle exists and is non-empty | Fetch it. Clean UTF-8, no parsing. |
 | `figshare_file` | Public Figshare `download_url` | Fetch if textual (CSV, README, docs). |
 | `oa_pdf` | Unpaywall/OpenAlex found a legal OA copy | Offer the link. Fetching costs a PDF parse the agent doesn't have. |
 | `abstract_only` | Metadata retrieved, no full text located | Say so explicitly. Do not imply more. |
@@ -44,12 +47,12 @@ one it will not.
 | `year` | `pnx.display.creationdate[0]` | `metadata["dc.date.issued"][0].value` | `published_date` | `publication_year` |
 | `type` | `pnx.display.type[0]` | `metadata["dc.type"][0].value` | `defined_type_name` | `type` |
 | `doi` | `pnx.addata.doi[0]` | `metadata["dc.identifier.doi"][0].value` | `doi` | `doi` |
-| `abstract` | `pnx.addata.abstract[0]` | `metadata["dc.description.abstract"][0].value` | `description` † | — ‡ |
+| `abstract` | `pnx.addata.abstract[0]` | `metadata["dc.description.abstract"][0].value` | `description` † | `abstract_inverted_index` ‡ |
 | `cite_uri` | `delivery.almaOpenurl` | `https://hdl.handle.net/{handle}` | `url_public_html` † | `primary_location.landing_page_url` |
 
 † Only on the detail endpoint `GET /v2/articles/{id}`, not in search results.
-‡ OpenAlex returns abstracts as an inverted index, which is expensive and awkward. Prefer
-the abstract from Primo, VTechWorks or Figshare when the same work appears in more than one.
+‡ OpenAlex returns abstracts as a word-to-positions inverted index. `sources/openalex.py`
+rebuilds it, which costs nothing server-side and would be absurd to ask a model to do.
 ¶ Primo titles are frequently duplicated in-field (`"Title: Title"`). Dedupe before display.
 
 ## Deriving `access_route` from Primo

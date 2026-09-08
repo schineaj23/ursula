@@ -16,3 +16,11 @@ __pycache__/
 venv/
 
 .DS_Store
+
+# stray probe downloads
+/content
+
+# packaging
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

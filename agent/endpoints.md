@@ -1,38 +1,30 @@
-# NebulaONE endpoint registration — v0
+# Registering Ursula
 
-Ten endpoints, all keyless. Sizes are measured, not estimated; see
-[`../reference/survey-corrections.md`](../reference/survey-corrections.md).
+Three endpoints, whatever the host. They are the same three functions everywhere: an HTTP
+service for NebulaONE and Open WebUI, an MCP server for locally run agents, a CLI for a
+skill in a host that can execute code.
 
-Replace `you@vt.edu` with a real VT address — it identifies the institution to OpenAlex's
-and Unpaywall's polite-use pools.
+The upstream sources are no longer registered anywhere. Ursula calls them; see
+[`../reference/upstream-apis.md`](../reference/upstream-apis.md) for what they return and
+what each one costs.
 
-## Two conventions, both load-bearing
+## Why three, and why GET
 
-**Only values the model should choose are parameters.** `vid`, `inst`, `scope`, `tab`,
-`limit`, `size`, `per-page`, `select` and `sort` are all baked into the registered URL, not
-exposed in the schema. The model cannot then widen a scope it shouldn't, or raise a limit
-past the context budget — the budget is enforced by registration, not by asking the prompt
-nicely. Pagination (`offset`) is deliberately omitted in v0 for the same reason; add it only
-once the size cap is known.
+Every operation is a `GET` with flat query parameters, because NebulaONE can register
+`http://host/path?param=value` and nothing else. Rather than a limitation to route around,
+that is the lowest common denominator every host can call, which is the shape a
+provider-agnostic API wants anyway.
 
-**Parameter descriptions are prompt surface.** The model reads them at call time, so each
-one carries its routing hint and its traps. The `uuid` descriptions are what teach the
-three-hop full-text chain — that sequence is learned from the schemas, not from the system
-prompt.
+The parameter descriptions below are prompt surface. A model reads them at call time, so
+each carries its routing hint and its traps, and they are worth editing with the same care
+as the system prompt.
 
 ---
 
-## 1 · `primo_search` — the licensed and central index
-
-Everything VT can get at: journal articles, ebooks, conference papers, across the Ex Libris
-central index plus VT holdings. **Broadest coverage of any source here.**
+## 1 · `/search` — find things across all four sources at once
 
 ```
-GET https://virginiatech.primo.exlibrisgroup.com/primaws/rest/pub/pnxs
-      ?vid=01VT_INST:01VT_INST&inst=01VT_INST&lang=en
-      &q=any,contains,{query}
-      &scope=MyInst_and_CI&tab=Everything
-      &offset=0&limit=5&sort=rank&pcAvailability=true
+GET https://<host>/search?query={query}&sources={sources}&limit=5
 ```
 
 ```json
@@ -41,264 +33,77 @@ GET https://virginiatech.primo.exlibrisgroup.com/primaws/rest/pub/pnxs
   "properties": {
     "query": {
       "type": "string",
-      "description": "The research topic to search for, as plain keywords — for example 'machine learning soil moisture'. Do not use boolean operators, quotation marks, or field prefixes; the endpoint applies 'any,contains' matching across all fields and treats operators as literal search terms. Three to six substantive nouns works best. Full sentences and question phrasing reduce recall sharply, so strip words like 'how does' and 'what is' before calling."
-    }
-  },
-  "required": ["query"]
-}
-```
-
-Records are at `docs[]`. Per record:
-
-| Need | Path |
-|---|---|
-| title | `pnx.display.title[0]` |
-| authors | `pnx.display.creator[]` |
-| type | `pnx.display.type[0]` |
-| DOI | `pnx.addata.doi[0]` |
-| ISSN | `pnx.addata.issn[0]` |
-| abstract | `pnx.addata.abstract[0]` |
-| open access flag | `pnx.display.oa` |
-| access signal | `delivery.availability[]` — `fulltext`, `fulltext_multiple` |
-| **handoff link** | `delivery.almaOpenurl` |
-
-> **`limit=5` is the ceiling** — measured at 91 KB (~17.5 KB/record; `limit=10` is 172 KB).
-> About 60% of each record is `pnx.search`, `pnx.facets` and `pnx.control`, none of which
-> the agent needs, and `/pnxs` has no field selector. This is the single biggest argument
-> for the v1 proxy.
->
-> **Titles are frequently duplicated** in this field (`"Title: Title"`). Dedupe on display.
-
-> ⚠️ **Undocumented endpoint.** This is the Discovery UI's own internal API, not a
-> contracted one — the same request your browser makes. It works, it needs no key, and it
-> is a reasonable bridge until an Ex Libris Developer Network key is issued. It can also
-> change without notice, so treat a schema break here as expected maintenance rather than a
-> surprise, and swap to the supported `/primo/v1/search` once a key exists.
-
-## 2 · `primo_catalog` — VT's own books and physical holdings
-
-Same endpoint, narrowed scope. Use for textbooks, "does the library have X", physical items.
-
-```
-GET https://virginiatech.primo.exlibrisgroup.com/primaws/rest/pub/pnxs
-      ?vid=01VT_INST:01VT_INST&inst=01VT_INST&lang=en
-      &q=any,contains,{query}
-      &scope=MyInstitution&tab=LibraryCatalog
-      &offset=0&limit=5&sort=rank&pcAvailability=true
-```
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "query": {
+      "description": "The research topic to search for, as plain keywords — for example 'machine learning soil moisture'. Do not use boolean operators, quotation marks, or field prefixes; the upstream indexes treat them as literal search terms. Three to six substantive nouns works best. Full sentences and question phrasing reduce recall sharply, so strip words like 'how does' and 'what is' before calling."
+    },
+    "sources": {
       "type": "string",
-      "description": "A book title, author, or subject to look for in Virginia Tech's own catalog — for example 'soil physics' or 'Hillel introduction to environmental soil physics'. Plain keywords only, no boolean operators. This searches VT's holdings rather than the global index, so it answers 'does the library have this' and 'what books do we own on this subject'. For journal articles use primo_search instead."
-    }
-  },
-  "required": ["query"]
-}
-```
-
-Verified: "soil physics" → 810 results, typed `book`, ~26 KB at `limit=3`. Physical
-availability is under `delivery.holding` and `delivery.displayLocation`.
-
-## 3 · `vtechworks_search` — VT's own output, and the only readable full text
-
-VT theses, dissertations, preprints, accepted manuscripts. **Start here whenever reading
-the document matters.**
-
-```
-GET https://vtechworks.lib.vt.edu/server/api/discover/search/objects
-      ?query={query}&dsoType=item&size=5
-```
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "query": {
-      "type": "string",
-      "description": "Keywords to search Virginia Tech's institutional repository — theses, dissertations, faculty preprints, accepted manuscripts and technical reports. Plain terms work best; this is a Solr index, so it also accepts field syntax like 'author:Smith' or quoted phrases when you need precision. This is the only source whose full text can actually be read, so search it whenever the user wants a document analyzed rather than just located."
-    }
-  },
-  "required": ["query"]
-}
-```
-
-Records live at:
-
-```
-_embedded.searchResult._embedded.objects[]._embedded.indexableObject
-```
-
-with `uuid`, `handle`, `name`, and a `metadata` object keyed by Dublin Core field names
-(`dc.title`, `dc.contributor.author`, `dc.description.abstract`, `dc.identifier.doi`,
-`dc.date.issued`), each a list of `{value, language, place}`.
-
-> **Keep `size=5`** — measured at 86 KB. Roughly 14 KB per item over 16 KB of fixed facet
-> and `_links` overhead, so `size=10` runs to ~157 KB. DSpace has no field-selection
-> parameter; the waste is structural.
-
-## 4 · `vtechworks_bundles` — full text, hop 1 of 3
-
-```
-GET https://vtechworks.lib.vt.edu/server/api/core/items/{itemUuid}/bundles
-```
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "itemUuid": {
-      "type": "string",
-      "description": "The 'uuid' field of a VTechWorks item, taken from a vtechworks_search response at _embedded.searchResult._embedded.objects[]._embedded.indexableObject.uuid. This is hop 1 of 3 in the full-text chain: call this to list the item's bundles, look for the one named TEXT, then pass that bundle's uuid to vtechworks_bitstreams. If no bundle is named TEXT, the item has no extracted text and is abstract-only — stop there and say so."
-    }
-  },
-  "required": ["itemUuid"]
-}
-```
-
-Returns `_embedded.bundles[]`. Look for `name == "TEXT"` and take its `uuid`. Its absence
-means no extracted text — the item is `abstract_only`.
-
-## 5 · `vtechworks_bitstreams` — hop 2
-
-```
-GET https://vtechworks.lib.vt.edu/server/api/core/bundles/{bundleUuid}/bitstreams
-```
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "bundleUuid": {
-      "type": "string",
-      "description": "The 'uuid' of the bundle named TEXT, from a vtechworks_bundles response. This is hop 2 of 3. The response lists bitstreams; take the first one's 'sizeBytes' and check it before going further, because the next call spends that many bytes of context. A journal article runs about 100 KB; a dissertation can run several times more."
-    }
-  },
-  "required": ["bundleUuid"]
-}
-```
-
-Returns `_embedded.bitstreams[]`. Take `_links.content.href` — and read `sizeBytes` first,
-because it tells you what you are about to spend.
-
-## 6 · `vtechworks_fulltext` — hop 3
-
-```
-GET https://vtechworks.lib.vt.edu/server/api/core/bitstreams/{bitstreamUuid}/content
-```
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "bitstreamUuid": {
-      "type": "string",
-      "description": "The uuid of the TEXT bitstream, from a vtechworks_bitstreams response — it is the last path segment of _embedded.bitstreams[0]._links.content.href. This is hop 3 of 3 and returns the document's entire plain text in one response. It is by far the most expensive call available to you: budget one per conversation, and only after the abstract has proved insufficient."
-    }
-  },
-  "required": ["bitstreamUuid"]
-}
-```
-
-Returns `text/plain; charset=UTF-8`. Clean extracted text, no PDF parsing.
-
-> **The expensive call.** A journal article measured 100 KB / 15,191 words. ETDs are
-> dissertations and run several times that. One per conversation.
-
-## 7 · `figshare_search`
-
-VT datasets and supplementary research products.
-
-```
-POST https://api.figshare.com/v2/articles/search
-Content-Type: application/json
-
-{"search_for": "{searchFor}", "limit": 25}
-```
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "searchFor": {
-      "type": "string",
-      "description": "Keywords describing the dataset being looked for, such as 'soil moisture sensor calibration'. This searches all of Figshare globally, not just Virginia Tech, so you must keep only results whose 'doi' begins with '10.7294' — those are VT's. Ignore 'group_id'; it does not identify VT. Recall for VT material is poor, so treat an empty result as 'I could not find it', never as 'VT has no such data'."
-    }
-  },
-  "required": ["searchFor"]
-}
-```
-
-Returns a flat array — no envelope, ~1.0 KB per item.
-
-> **Filter on the DOI prefix `10.7294`, not on `group_id`.** VT records span 23+ group ids;
-> the `group` and `institution` body filters both return empty.
->
-> **Expect low recall.** Global Figshare search does not surface VT's small corpus for
-> topical queries — `"soil moisture"` at `limit=25` returned zero VT records. This endpoint
-> is for known-item lookups, not dataset discovery. Getting VT's institution ID from Data
-> Services is what fixes it. See the corrections file.
-
-## 8 · `figshare_detail`
-
-Search results omit `description`, `authors`, and `files`. For a specific record:
-
-```
-GET https://api.figshare.com/v2/articles/{articleId}
-```
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "articleId": {
+      "description": "Comma-separated list of sources to search, or omit for the default of primo, vtechworks and openalex together. 'primo' is the library's discovery layer and has by far the broadest coverage, but you will rarely be able to read what it finds. 'vtechworks' is VT's institutional repository and the only source whose full text can actually be read, so include it whenever reading the document matters. 'openalex' finds legal open-access copies of paywalled work. 'vtdr' is VT's data repository, for datasets rather than prose. 'primo_catalog' is VT's own books and physical holdings, for 'does the library have X'."
+    },
+    "limit": {
       "type": "integer",
-      "description": "The numeric 'id' of a Figshare record from a figshare_search result — for example 33415639. Not the DOI. Call this only for a record you have already decided is relevant, since it is the only way to get the description, author list, and files[].download_url, none of which appear in search results."
+      "description": "Results requested from each source before merging, between 1 and 20. Five is the default and is usually right. Raising it widens coverage and lengthens the response proportionally; the merged set is normally smaller than sources times limit, because the same work found twice becomes one record.",
+      "default": 5
     }
   },
-  "required": ["articleId"]
+  "required": ["query"]
 }
 ```
 
-`files[].download_url` is unauthenticated for public items.
+Returns `records[]`, already merged and normalized, readable ones first. Roughly 17 KB for
+fifteen records against the ~205 KB the same four searches cost unmerged.
 
-## 9 · `openalex_search`
+| Field | Meaning |
+|---|---|
+| `id` | Pass to `/read` verbatim. Namespaced, e.g. `vtechworks:<uuid>` |
+| `access_route` | One of `vtechworks_text`, `figshare_file`, `oa_pdf`, `abstract_only`, `licensed_handoff` |
+| `readable` | True only when `/read` can return real text |
+| `also_in` | Other sources holding the same work — usually the deposited-manuscript pattern |
+| `cite_uri` | Where to send a human. For Primo this is the VT link resolver |
+| `oa_url` | A legal open copy, when one exists |
 
-Scholarly metadata worldwide, with reliable open-access status. Complements Primo — Primo
-knows what VT licenses, OpenAlex knows what is freely readable.
+`notes[]` carries anything the caller should say out loud, such as Figshare's recall
+problem or a source that failed.
+
+## 2 · `/read` — full text, reduced to what answers the question
 
 ```
-GET https://api.openalex.org/works
-      ?search={search}&per-page=5&mailto=you@vt.edu
-      &select=id,doi,title,publication_year,type,open_access,primary_location,authorships
+GET https://<host>/read?id={id}&question={question}&max_chars=6000
 ```
 
 ```json
 {
   "type": "object",
   "properties": {
-    "search": {
+    "id": {
       "type": "string",
-      "description": "Keywords, or an exact article title when checking a specific paper. Searches titles, abstracts and full text across the global scholarly literature. Use this to find a legally readable open-access copy of something primo_search surfaced behind a subscription: check 'open_access.oa_status' and 'open_access.oa_url' on each result. Note that the 'doi' field comes back as a full URL like 'https://doi.org/10.1234/xyz'."
+      "description": "A record id exactly as it appeared in a /search response, such as 'vtechworks:b716bd09-0c7b-4c06-b582-4301b27cf5fe'. Only records marked 'readable': true have retrievable text; calling this on anything else returns guidance on what to do instead, not an error."
+    },
+    "question": {
+      "type": "string",
+      "description": "What you want to learn from this document, phrased in the user's own terms — for example 'what accuracy did the model achieve and on what data'. Passages are ranked against this, so a specific question returns a far better excerpt than a bare topic. Omit it and you get the document's opening instead, which is rarely what you want."
+    },
+    "max_chars": {
+      "type": "integer",
+      "description": "Ceiling on the characters of document text returned, between 200 and 40000. The default of 6000 is a few pages and answers most questions. Raise it for a synthesis across a whole argument; lower it when reading several documents in one conversation.",
+      "default": 6000
     }
   },
-  "required": ["search"]
+  "required": ["id"]
 }
 ```
 
-> **`select=` is mandatory, not an optimization.** Without it a work is ~20 KB; with it,
-> ~5.6 KB. Drop `authorships` too if you only need citation-level detail.
+Returns `passages[]` in document order, plus `chars_total` and `chars_returned` so the
+caller knows how much of the document it did not see. `text_available: false` comes with
+`guidance` naming the correct next move.
 
-`open_access.oa_status` and `open_access.oa_url` often make a separate Unpaywall call
-unnecessary.
+> **This endpoint is the reason the service exists.** One VTechWorks article's extracted
+> text is 100 KB, which an agent can afford once. Ranked to 4 KB, it can afford it twenty
+> times, and the one-document-per-conversation ceiling disappears.
 
-## 10 · `unpaywall_resolve` ⚠️ not yet verified
+## 3 · `/resolve` — DOI to open-access status
 
 ```
-GET https://api.unpaywall.org/v2/{doi}?email=you@vt.edu
+GET https://<host>/resolve?doi={doi}
 ```
 
 ```json
@@ -307,14 +112,42 @@ GET https://api.unpaywall.org/v2/{doi}?email=you@vt.edu
   "properties": {
     "doi": {
       "type": "string",
-      "description": "A bare DOI such as '10.1007/s11269-024-04069-3'. Strip any 'https://doi.org/' prefix before calling — OpenAlex returns DOIs in full-URL form and this endpoint returns 404 for them. Only call this when OpenAlex's open_access block was missing or inconclusive for the same DOI; otherwise it is a second round trip for a fact you already have."
+      "description": "A DOI, either bare like '10.1007/s11269-024-04069-3' or as a full 'https://doi.org/...' URL — both are accepted, so no stripping is needed. Call this on anything the discovery layer surfaced behind a subscription, before telling the user they cannot read it. Returns 'oa_url' when a legal open copy exists."
     }
   },
   "required": ["doi"]
 }
 ```
 
-`best_oa_location.url_for_pdf` is the legal OA copy when one exists. The `email` parameter
-is required by Unpaywall.
+About 2 KB. Backed by OpenAlex, which is why Unpaywall is no longer a dependency: the same
+fact, one call, and no path segment NebulaONE cannot register.
 
-Run `./probes/probe.sh --email you@vt.edu` before relying on this one.
+---
+
+## Registering it
+
+**NebulaONE.** Register the three URLs above against the deployed host. No API key, no
+headers. Paste [`system-prompt.md`](system-prompt.md) as the agent's prompt.
+
+**Open WebUI.** Add the service as an OpenAPI tool server. It reads
+`https://<host>/openapi.json` and generates all three tools with the descriptions above,
+so there is nothing to type twice.
+
+**Claude Code, prime-agent, Claude Desktop, Cursor.** Run the MCP server instead. Same
+three functions, same record shape:
+
+```jsonc
+{
+  "mcpServers": {
+    "ursula": { "command": "ursula-mcp" }
+  }
+}
+```
+
+`ursula-mcp --http --port 8001` serves streamable HTTP for hosts that prefer it.
+
+**A skill, or anything that can run a shell.** `ursula search "…"` and
+`ursula read <id> --question "…"` print the same JSON. A host with a filesystem could of
+course call VTechWorks directly and grep the result, but it would then have to re-derive
+VT's routing rules and the access-route contract, which is exactly what this keeps in one
+place.

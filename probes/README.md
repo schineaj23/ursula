@@ -1,28 +1,23 @@
 # Probes
 
+Endpoint smoke-testing now lives in the test suite:
+
 ```sh
-./probe.sh                      # keyless sources
-./probe.sh --email you@vt.edu   # also exercises Unpaywall
+pytest              # offline: parsers, merging, ranking, the HTTP contract
+pytest --live       # also calls Primo, VTechWorks, Figshare and OpenAlex for real
 ```
 
-`probe.sh` calls every v0 endpoint and prints the payload size of each. Those sizes are the
-design constraint — on NebulaONE, an endpoint's response goes straight into the agent's
-context window — so re-run it after any endpoint change, and treat a size regression as a
-real regression.
-
-It also re-checks the two things
-[`../reference/survey-corrections.md`](../reference/survey-corrections.md) asserts are
-broken. If Figshare's `group` filter ever starts working, the probe fails loudly and the
-corrections file needs revisiting.
+`pytest --live` replaced `probe.sh`. It asserts the same upstream shapes and keeps the same
+regression guards, including the check that Figshare's `group` filter is still broken. A
+schema change upstream now shows up as a named failing test rather than an empty result set.
 
 ---
 
 ## The size-cap test
 
-**The highest-value unknown in this project.** NebulaONE's response size cap — where it
-truncates an endpoint's output, if it does — determines whether Primo needs a hosted proxy
-or is merely wasteful. Ten minutes to answer, and it should be answered before any
-infrastructure is built.
+Less urgent than it was — the service keeps every response small, so a search is ~17 KB and
+a document read ~4 KB rather than the 90–100 KB the raw APIs return. It is still worth
+knowing, because it bounds how large a `limit` or `max_chars` an agent can usefully ask for.
 
 It cannot be tested from here; it is a property of the platform, not the APIs. Run it inside
 NebulaONE:
@@ -50,11 +45,10 @@ NebulaONE:
 |---|---|---|---|
 | _pending_ | | | |
 
-What the answer implies:
+What the answer implies now that the service exists:
 
-- **≥ 500 KB** — Primo's raw `/pnxs` is registrable directly and the proxy is a token-cost
-  optimization, not a requirement. Full-text reads of ETDs become viable, one at a time.
-- **~100–500 KB** — matches what v0 already assumes. Keep the small `size`/`per-page`
-  limits; one full-text read per conversation stands.
-- **< 100 KB** — even a single VTechWorks full-text read is at risk, and server-side
-  passage ranking moves from a v1 nicety to the thing that makes the agent work at all.
+- **≥ 200 KB** — the defaults are comfortable, and `max_chars` can go to 40,000 for a
+  synthesis across a long document.
+- **~50–200 KB** — the defaults are right as they stand. No change.
+- **< 50 KB** — lower the default `limit` and `abstract_chars`, and read documents in
+  smaller passages.
