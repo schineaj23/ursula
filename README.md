@@ -62,6 +62,13 @@ ursula serve --host 0.0.0.0 --port 8080
 | `GET /resolve` | `doi` |
 | `GET /health` | — |
 
+Or in Docker, which serves on port 8000:
+
+```sh
+docker build -t ursula .
+docker run --rm -p 8000:8000 -e URSULA_MAILTO=you@vt.edu ursula
+```
+
 The OpenAPI schema is at `/openapi.json`. To set Ursula up as a NebulaONE agent, register
 the endpoints as described in [`agent/endpoints.md`](agent/endpoints.md) and use
 [`agent/system-prompt.md`](agent/system-prompt.md) as the agent's prompt.
