@@ -1,5 +1,7 @@
 # Ursula
 
+**Use this agent in HokieAI [here](https://hokie.ai.vt.edu/chat/642acc22-7caf-432f-ae10-e886e05a564a)!**
+
 Library research for Virginia Tech University Libraries. Ursula searches VT's discovery
 layer, institutional repository, data repository and the open-access literature, and returns
 compact, normalized results an AI agent can use without blowing its context window.
