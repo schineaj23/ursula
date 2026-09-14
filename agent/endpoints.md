@@ -28,18 +28,18 @@ cap.
 
 ---
 
-## 1 · `/search` — find things across all four sources at once
+## 1 · `/search` — the few most relevant records across all four sources
 
-**Description** (990 characters):
+**Description** (1012 characters):
 
-> Search Virginia Tech's library sources — the Primo discovery layer, the VTechWorks institutional repository, the VT Data Repository and OpenAlex — and return one merged, deduplicated set of records.
+> Search Virginia Tech's library sources — the Primo discovery layer, the VTechWorks institutional repository, the VT Data Repository and OpenAlex — and return the few most relevant records, merged and deduplicated. If the request is broad, ask the user to narrow it before calling.
 >
-> Results are ordered by relevance and interleaved across sources. Access route is a tiebreak worth about one position, never a ranking: a paywalled article the sources ranked first still comes first, because it is usually the right answer and a VT user reaches it by signing in. Do not lead with whatever happens to be open.
+> Results are ordered by relevance and interleaved across sources. Access route is a tiebreak, never a ranking: a paywalled article the sources ranked first still comes first, because a VT user reaches it by signing in.
 >
-> Every record carries access_route (vtechworks_text, figshare_file, oa_pdf, abstract_only or licensed_handoff), readable, a cite_uri for sending a human, and oa_url where a legal open copy exists. A record found in more than one source lists the others in also_in, which usually means VT deposited the accepted manuscript of a paywalled article. access_mix reports the spread of routes, and notes carries anything worth saying out loud, such as a source that failed.
+> Every record carries access_route (vtechworks_text, figshare_file, oa_pdf, abstract_only or licensed_handoff), readable, a cite_uri for sending a human, and oa_url where a legal open copy exists. also_in lists other sources holding the same work, usually VT's deposited manuscript of a paywalled article. matched and more_available say how many relevant results were left out: offer those to the user rather than fetching them unasked. notes carries anything worth saying out loud, such as a source that failed.
 
 ```
-GET https://<host>/search?query={query}&sources={sources}&readable_only={readable_only}&limit={limit}
+GET https://<host>/search?query={query}&sources={sources}&max_results={max_results}&readable_only={readable_only}&limit={limit}
 ```
 
 ```json
@@ -54,6 +54,11 @@ GET https://<host>/search?query={query}&sources={sources}&readable_only={readabl
       "type": "string",
       "description": "Comma-separated list of sources to search, or omit for the default of primo, vtechworks and openalex together. 'primo' is the library's discovery layer and has by far the broadest coverage, but you will rarely be able to read what it finds. 'vtechworks' is VT's institutional repository and the only source whose full text can actually be read, so include it whenever reading the document matters. 'openalex' finds legal open-access copies of paywalled work. 'vtdr' is VT's data repository, for datasets rather than prose. 'primo_catalog' is VT's own books and physical holdings, for 'does the library have X'."
     },
+    "max_results": {
+      "type": "integer",
+      "description": "How many of the merged, relevance-ordered records to return, between 1 and 20. The default of 5 is the right answer size for almost every question, and every extra record costs context you will want later for reading. Raise it only when the user asks for more or a literature review genuinely needs breadth. If the top five are off-target, refine the query instead of asking for more.",
+      "default": 5
+    },
     "readable_only": {
       "type": "boolean",
       "description": "Discard every record whose full text cannot be fetched. False by default and rarely what you want, because it drops the licensed and catalog material that is often the most relevant answer, leaving only what happens to be open. Set it true only when the task genuinely requires reading text, such as comparing the methods sections of several papers.",
@@ -61,7 +66,7 @@ GET https://<host>/search?query={query}&sources={sources}&readable_only={readabl
     },
     "limit": {
       "type": "integer",
-      "description": "Results requested from each source before merging, between 1 and 20. Five is the default and is usually right. Raising it widens coverage and lengthens the response proportionally; the merged set is normally smaller than sources times limit, because the same work found twice becomes one record.",
+      "description": "How deep to search each source before merging, between 1 and 20. Five is the default and is usually right. This is not how many results come back — max_results decides that — so raising it only helps when the right record might sit below the top five of a single source.",
       "default": 5
     }
   },
@@ -69,9 +74,12 @@ GET https://<host>/search?query={query}&sources={sources}&readable_only={readabl
 }
 ```
 
-Returns `records[]`, already merged and normalized, **ordered by relevance and interleaved
-across sources**. Roughly 17 KB for fifteen records against the ~205 KB the same four
-searches cost unmerged.
+Returns the `max_results` most relevant of the merged records (five by default) in
+`records[]`, normalized and **ordered by relevance and interleaved across sources**.
+`matched` is how many the merge produced and `more_available` flags that some were left
+out, so the agent can offer them rather than fetch them unasked. The response shrinks in
+proportion: all fifteen or so records of a default search came to ~17 KB, against the
+~205 KB the same searches cost unmerged.
 
 Access route is a tiebreak worth about one position, never a ranking. A paywalled article
 the sources ranked first still comes first, because that is usually the right answer and

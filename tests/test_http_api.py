@@ -7,12 +7,13 @@ from ursula import core, http_api
 @pytest.fixture
 def app(monkeypatch):
     async def fake_search(
-        query, sources, limit, readable_only=False, abstract_chars=500
+        query, sources, limit, readable_only=False, abstract_chars=500, max_results=5
     ):
         return {
             "query": query,
             "sources": list(sources),
             "limit": limit,
+            "max_results": max_results,
             "count": 0,
             "records": [],
         }
@@ -55,6 +56,14 @@ def test_search_rejects_an_unknown_source_by_name(app):
 
 def test_search_bounds_the_limit(app):
     assert app.get("/search", params={"query": "soil", "limit": 99}).status_code == 422
+
+
+def test_search_returns_five_results_unless_asked_for_more(app):
+    assert app.get("/search", params={"query": "soil"}).json()["max_results"] == 5
+    body = app.get("/search", params={"query": "soil", "max_results": 12}).json()
+    assert body["max_results"] == 12
+    params = {"query": "soil", "max_results": 99}
+    assert app.get("/search", params=params).status_code == 422
 
 
 def test_read_passes_the_question_through(app):

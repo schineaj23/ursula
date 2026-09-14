@@ -10,7 +10,9 @@ mcp = MCPServer(
     version="0.1.0",
     instructions=(
         "Search Virginia Tech's library sources, then read what is readable and link "
-        "what is not. Primo tells you what exists; VTechWorks and OpenAlex tell you what "
+        "what is not. When a request is broad, ask the user to narrow it before "
+        "searching, and present the few most relevant results rather than everything "
+        "found. Primo tells you what exists; VTechWorks and OpenAlex tell you what "
         "can be read. Rank by relevance rather than by access, since the best answer is "
         "often paywalled, and respect every record's access_route: never state or imply "
         "you have read something you have only found."
@@ -24,11 +26,21 @@ async def ursula_search(
     sources: str = "",
     limit: int = 5,
     readable_only: bool = False,
+    max_results: int = 5,
 ) -> dict:
-    """Search Virginia Tech's library sources and return one merged, normalized set.
+    """Search Virginia Tech's library sources and return the most relevant few records.
+
+    If the request is broad ("papers on climate change"), ask the user to narrow it
+    before calling: the angle they care about, what it is for, the kind of material,
+    any date or discipline constraints. Skip that when the request is already specific.
 
     `query` is plain keywords, three to six substantive nouns. Boolean operators and
     question phrasing both hurt recall.
+
+    `max_results` (default 5, up to 20) is how many merged records come back; `limit` is
+    only how deep each source is searched. Keep the default. `matched` and
+    `more_available` say what was left out: offer it to the user rather than fetching
+    it unasked, and if the top results are off-target, refine the query instead.
 
     `sources` is a comma-separated subset of primo, primo_catalog, vtechworks, openalex,
     vtdr; it defaults to primo, vtechworks and openalex. Primo has the broadest coverage
@@ -50,7 +62,11 @@ async def ursula_search(
     """
     chosen = tuple(s.strip() for s in sources.split(",") if s.strip())
     return await core.search(
-        query, chosen or core.DEFAULT_SOURCES, limit, readable_only
+        query,
+        chosen or core.DEFAULT_SOURCES,
+        limit,
+        readable_only,
+        max_results=max_results,
     )
 
 

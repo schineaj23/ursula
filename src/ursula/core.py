@@ -132,12 +132,22 @@ async def search(
     limit: int = 5,
     readable_only: bool = False,
     abstract_chars: int = 500,
+    max_results: int = 5,
 ) -> dict:
+    """Search `sources`, merge, and return only the `max_results` most relevant records.
+
+    `limit` is how deep each source is searched, which feeds the merge; `max_results` is
+    how much of the merged set reaches the caller. They are separate because every record
+    returned costs an agent context, and the head of a relevance-ordered list is what a
+    user wants. `matched` and `more_available` say what was left out.
+    """
     async with client() as c:
         groups, notes = await _gather(c, query, sources, limit)
     records = merge(groups)
     if readable_only:
         records = [r for r in records if r.readable]
+    matched = len(records)
+    records = records[:max_results]
     mix: dict[str, int] = {}
     for r in records:
         mix[r.access_route.value] = mix.get(r.access_route.value, 0) + 1
@@ -145,12 +155,16 @@ async def search(
         "query": query,
         "sources": list(sources),
         "count": len(records),
+        "matched": matched,
+        "more_available": matched > len(records),
         "readable": sum(1 for r in records if r.readable),
         "access_mix": mix,
         "ordering": (
             "Relevance, interleaved across sources. Access route breaks ties only, so a "
             "record you cannot read may well be the best answer — present these together "
-            "and let the user choose, rather than leading with whatever happens to be open."
+            "and let the user choose, rather than leading with whatever happens to be open. "
+            "These are the most relevant of `matched`; if more_available, tell the user "
+            "how many more there are and offer them instead of fetching them unasked."
         ),
         "records": [r.to_dict(abstract_chars) for r in records],
         "notes": notes,

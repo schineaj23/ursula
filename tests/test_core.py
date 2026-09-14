@@ -1,3 +1,4 @@
+from ursula import core
 from ursula.core import merge
 from ursula.models import AccessRoute, Record
 
@@ -84,3 +85,26 @@ def test_licensed_outranks_a_record_with_no_route_at_all():
     orphan = rec("openalex", AccessRoute.ABSTRACT_ONLY, title="A", rank=3)
     order = [r.access_route for r in merge([[orphan], [handoff]])]
     assert order == [AccessRoute.LICENSED_HANDOFF, AccessRoute.ABSTRACT_ONLY]
+
+
+async def test_search_returns_only_the_most_relevant_and_says_what_it_left_out(
+    monkeypatch,
+):
+    """Every record returned costs an agent context; the head of the list is the answer."""
+    group = [
+        rec("openalex", AccessRoute.ABSTRACT_ONLY, n=i, title=f"Paper {i}", rank=i)
+        for i in range(8)
+    ]
+
+    async def fake_gather(c, query, sources, limit):
+        return [group], []
+
+    monkeypatch.setattr(core, "_gather", fake_gather)
+    out = await core.search("soil", max_results=3)
+    assert [r["title"] for r in out["records"]] == ["Paper 0", "Paper 1", "Paper 2"]
+    assert out["count"] == 3
+    assert out["matched"] == 8
+    assert out["more_available"] is True
+
+    everything = await core.search("soil", max_results=20)
+    assert everything["count"] == 8 and everything["more_available"] is False

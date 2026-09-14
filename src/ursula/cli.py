@@ -19,7 +19,12 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help=f"comma-separated; any of {', '.join(core.SOURCES)}",
     )
-    p_search.add_argument("--limit", type=int, default=5)
+    p_search.add_argument(
+        "--limit", type=int, default=5, help="how deep to search each source"
+    )
+    p_search.add_argument(
+        "--max-results", type=int, default=5, help="merged records to return"
+    )
     p_search.add_argument("--readable-only", action="store_true")
 
     p_read = sub.add_parser("read", help="read a record's full text as ranked passages")
@@ -50,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
                 chosen or core.DEFAULT_SOURCES,
                 args.limit,
                 args.readable_only,
+                max_results=args.max_results,
             )
         )
     elif args.cmd == "read":

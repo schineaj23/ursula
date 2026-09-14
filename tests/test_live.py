@@ -74,7 +74,9 @@ async def test_search_merges_sources_into_one_small_payload():
     """The whole argument for the service: ~200 KB upstream, ~20 KB out."""
     import json
 
-    result = await core.search(QUERY, ("primo", "vtechworks", "openalex"), limit=5)
+    result = await core.search(
+        QUERY, ("primo", "vtechworks", "openalex"), limit=5, max_results=20
+    )
     assert result["count"] >= 10
     assert result["readable"] >= 1
     assert len(json.dumps(result)) < 40_000
@@ -95,7 +97,9 @@ async def test_read_refuses_records_it_cannot_read():
 
 async def test_search_returns_a_mix_of_access_routes():
     """A result set that is all open access has silently narrowed the library."""
-    result = await core.search("climate adaptation coastal virginia", limit=5)
+    result = await core.search(
+        "climate adaptation coastal virginia", limit=5, max_results=20
+    )
     assert len(result["access_mix"]) >= 3, result["access_mix"]
     top = [r["access_route"] for r in result["records"][:6]]
     assert len(set(top)) >= 2, "the head of the list should not be one route"
@@ -104,7 +108,10 @@ async def test_search_returns_a_mix_of_access_routes():
 async def test_every_primo_record_carries_a_whole_usable_link():
     """A link with a space in it autolinks to 126 of its 795 characters and dies."""
     result = await core.search(
-        "climate adaptation coastal virginia", ("primo", "primo_catalog"), limit=5
+        "climate adaptation coastal virginia",
+        ("primo", "primo_catalog"),
+        limit=5,
+        max_results=20,
     )
     links = [r.get("cite_uri") for r in result["records"]]
     assert links and all(links), "every discovery record needs somewhere to send a human"

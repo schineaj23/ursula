@@ -8,7 +8,7 @@ It does three things:
 
 | Function | What it does |
 |---|---|
-| `search` | Search all sources at once; results are merged, deduplicated and ranked by relevance |
+| `search` | Search all sources at once; returns the five most relevant merged, deduplicated results |
 | `read` | Fetch a document's full text, reduced to the passages that answer a question |
 | `resolve` | Check whether a DOI has a legal open-access copy, and where |
 
@@ -41,7 +41,7 @@ Install only what you need with `.[http]` or `.[mcp]` instead of `.[all]`.
 
 ```sh
 ursula search "machine learning soil moisture"
-ursula search "soil moisture" --sources vtechworks,openalex --limit 10
+ursula search "soil moisture" --sources vtechworks,openalex --max-results 10
 ursula read vtechworks:<uuid> --question "what accuracy was reported"
 ursula resolve <doi>                # bare DOI or doi.org URL
 ```
@@ -57,7 +57,7 @@ ursula serve --host 0.0.0.0 --port 8080
 
 | Endpoint | Parameters |
 |---|---|
-| `GET /search` | `query`, `sources`, `limit` (1–20), `readable_only` |
+| `GET /search` | `query`, `sources`, `max_results` (1–20, default 5), `limit` (per-source depth, 1–20), `readable_only` |
 | `GET /read` | `id`, `question`, `max_chars` (200–40000) |
 | `GET /resolve` | `doi` |
 | `GET /health` | — |
@@ -107,8 +107,9 @@ Every record uses the same shape, documented in
 - **`also_in`**: other sources where the same work turned up, often a VT-deposited copy
   of a paywalled article.
 
-Search responses also include `access_mix` (how many results fall under each route) and
-`notes` (for example, a source that failed).
+Search responses also include `matched` and `more_available` (how many relevant results
+were left out), `access_mix` (how many returned results fall under each route) and `notes`
+(for example, a source that failed).
 
 ## Known limitations
 
